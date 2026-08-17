@@ -1,53 +1,41 @@
 import os
 import requests
-import hashlib
+import difflib
 from bs4 import BeautifulSoup
 
-URL_TO_MONITOR = "https://lizzymcalpine.com"
-HASH_FILE = "last_hash.txt"
+URL_TO_MONITOR = "https://www.lizzymcalpine.com/"
+TEXT_FILE = "website_text.txt"
 
-# Fetching secrets from GitHub
 TOKEN_SECRET = os.environ.get("TELEGRAM_TOKEN", "").strip()
 CHAT_ID_SECRET = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+REPO_SLUG = os.environ.get("GITHUB_REPOSITORY", "") # Automatically grabs your repo name (username/repo)
 
 def send_telegram(message):
-    # HARDCODED CLEAN URL STRUCTURE
-    # This prevents any environment string corruption
     base_domain = "api.telegram.org"
-    
-    # Clean the token just in case
     clean_token = TOKEN_SECRET.replace("bot", "").strip()
     full_path = f"https://{base_domain}/bot{clean_token}/sendMessage"
-    
-    print(f"[DEBUG] Attempting request to structural domain: {base_domain}")
     
     payload = {
         "chat_id": CHAT_ID_SECRET,
         "text": message,
-        "parse_mode": "Markdown"
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
     }
     
     try:
-        # We use explicit headers and a forced clean post request
         headers = {"Content-Type": "application/json"}
-        response = requests.post(full_path, json=payload, headers=headers, timeout=15)
-        
-        print(f"[DEBUG] HTTP Status Code: {response.status_code}")
-        if response.status_code == 200:
-            print("🎉 Success! Message delivered to Telegram.")
-        else:
-            print(f"❌ Telegram Error Response: {response.text}")
-            
+        requests.post(full_path, json=payload, headers=headers, timeout=15)
     except Exception as e:
-        print(f"❌ Connection Error: {e}")
+        print(f"❌ Telegram Error: {e}")
 
 def main():
     if not TOKEN_SECRET or not CHAT_ID_SECRET:
-        print("❌ Configuration Error: GitHub Secrets are empty or missing.")
+        print("❌ Configuration Error: GitHub Secrets are empty.")
         return
 
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WebsiteMonitor/1.3'}
+        # 1. Fetch website text
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WebsiteMonitor/1.5'}
         response = requests.get(URL_TO_MONITOR, headers=headers, timeout=15)
         response.raise_for_status()
         
@@ -55,25 +43,57 @@ def main():
         for element in soup(["script", "style", "meta", "noscript", "input"]):
             element.decompose()
             
-        clean_content = soup.get_text(separator="\n", strip=True)
-        current_hash = hashlib.sha256(clean_content.encode('utf-8')).hexdigest()
-        
-        previous_hash = ""
-        if os.path.exists(HASH_FILE):
-            with open(HASH_FILE, "r") as f:
-                previous_hash = f.read().strip()
-        
-        if current_hash != previous_hash:
-            print("Change detected!")
-            if previous_hash:
-                send_telegram(f"🎵 *LM Website Update!*\n\nA change was detected on the site. Check it out: {URL_TO_MONITOR}")
-            else:
-                print("First run initialized. Baseline hash stored.")
+        new_text = soup.get_text(separator="\n", strip=True)
+        new_lines = [line.strip() for line in new_text.splitlines() if line.strip()]
+
+        # 2. Read old text from repository
+        old_lines = []
+        if os.path.exists(TEXT_FILE):
+            with open(TEXT_FILE, "r", encoding="utf-8") as f:
+                old_lines = [line.strip() for line in f.readlines() if line.strip()]
+
+        # 3. Detect changes line-by-line
+        if old_lines:
+            # Compares the lines and extracts only additions (+) or removals (-)
+            diff = list(difflib.ndiff(old_lines, new_lines))
+            changes = []
             
-            with open(HASH_FILE, "w") as f:
-                f.write(current_hash)
+            for line in diff:
+                if line.startswith('+ '):
+                    changes.append(f"🟢 *Added:* {line[2:]}")
+                elif line.startswith('- '):
+                    changes.append(f"🔴 *Removed:* {line[2:]}")
+
+            if changes:
+                print("Change detected!")
+                
+                # Limit size so Telegram handles the text size perfectly
+                changes_summary = "\n".join(changes[:15])
+                if len(changes) > 15:
+                    changes_summary += f"\n...and {len(changes) - 15} more changes."
+
+                # Create direct links to GitHub history and the real website
+                github_history_link = f"https://github.com/{REPO_SLUG}/commits/main/{TEXT_FILE}"
+                
+                alert_msg = (
+                    f"🎵 *LM Website Update!*\n\n"
+                    f"*What changed:*\n{changes_summary}\n\n"
+                    f"🔗 [Open Website]({URL_TO_MONITOR})\n"
+                    f"📂 [View History Changes on GitHub]({github_history_link})"
+                )
+                
+                send_telegram(alert_msg)
+                
+                # Save the new text update
+                with open(TEXT_FILE, "w", encoding="utf-8") as f:
+                    f.write("\n".join(new_lines))
+            else:
+                print("✅ No visible changes detected.")
         else:
-            print("No visible changes detected on the site.")
+            # First initialization run
+            print("First run initialized. Full homepage content saved to GitHub.")
+            with open(TEXT_FILE, "w", encoding="utf-8") as f:
+                f.write("\n".join(new_lines))
             
     except Exception as e:
         print(f"❌ System Error: {e}")
