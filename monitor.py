@@ -4,34 +4,50 @@ import hashlib
 from bs4 import BeautifulSoup
 
 URL_TO_MONITOR = "https://lizzymcalpine.com"
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 HASH_FILE = "last_hash.txt"
 
+# Fetching secrets from GitHub
+TOKEN_SECRET = os.environ.get("TELEGRAM_TOKEN", "").strip()
+CHAT_ID_SECRET = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+
 def send_telegram(message):
-    # This automatically fixes the token if the word 'bot' is missing or duplicated
-    token = TELEGRAM_TOKEN
-    if not token.startswith("bot"):
-        token = f"bot{token}"
-        
-    telegram_url = f"https://telegram.org{token}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    # HARDCODED CLEAN URL STRUCTURE
+    # This prevents any environment string corruption
+    base_domain = "api.telegram.org"
+    
+    # Clean the token just in case
+    clean_token = TOKEN_SECRET.replace("bot", "").strip()
+    full_path = f"https://{base_domain}/bot{clean_token}/sendMessage"
+    
+    print(f"[DEBUG] Attempting request to structural domain: {base_domain}")
+    
+    payload = {
+        "chat_id": CHAT_ID_SECRET,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     
     try:
-        response = requests.post(telegram_url, json=payload, timeout=10)
-        print(f"Telegram API Response Status: {response.status_code}")
-        if response.status_code != 200:
-            print(f"Telegram API Error Text: {response.text}")
+        # We use explicit headers and a forced clean post request
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(full_path, json=payload, headers=headers, timeout=15)
+        
+        print(f"[DEBUG] HTTP Status Code: {response.status_code}")
+        if response.status_code == 200:
+            print("🎉 Success! Message delivered to Telegram.")
+        else:
+            print(f"❌ Telegram Error Response: {response.text}")
+            
     except Exception as e:
-        print(f"Failed to send Telegram message: {e}")
+        print(f"❌ Connection Error: {e}")
 
 def main():
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Error: Missing Telegram configuration in GitHub Secrets.")
+    if not TOKEN_SECRET or not CHAT_ID_SECRET:
+        print("❌ Configuration Error: GitHub Secrets are empty or missing.")
         return
 
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WebsiteMonitor/1.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WebsiteMonitor/1.3'}
         response = requests.get(URL_TO_MONITOR, headers=headers, timeout=15)
         response.raise_for_status()
         
@@ -60,7 +76,7 @@ def main():
             print("No visible changes detected on the site.")
             
     except Exception as e:
-        print(f"Error executing monitor: {e}")
+        print(f"❌ System Error: {e}")
 
 if __name__ == "__main__":
     main()
