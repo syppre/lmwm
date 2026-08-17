@@ -1,0 +1,36 @@
+name: LM Monitor
+
+on:
+  schedule:
+    # Runs exactly every 10 minutes 24/7
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allows manual triggers
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: pip install requests beautifulsoup4
+
+    - name: Run the monitor script
+      env:
+        URL_TO_MONITOR: "https://www.lizzymcalpine.com/"
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python monitor.py
+
+    - name: Save the updated hash back to the repository
+      run: |
+        git config --global user.name "GitHub Action Bot"
+        git config --global user.email "actions@github.com"
+        git add last_hash.txt
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update website hash cache [skip ci]" && git push)
